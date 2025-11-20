@@ -157,3 +157,177 @@
                         <small style="color:#64748b">الأزرق: موثق | المخطط: تقديري</small>
                     </div>
                     <div class="timeline-wrapper">
+                        <div id="chartCanvas" class="chart-container">
+                            </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <nav class="mobile-nav">
+        <div class="mn-item active" onclick="app.nav('home')"><i class="fa-solid fa-list"></i> السجل</div>
+        <div class="mn-item" onclick="app.nav('timeline')"><i class="fa-solid fa-chart-bar"></i> المخطط</div>
+        <div class="mn-item" onclick="app.openModal('new')"><i class="fa-solid fa-circle-plus" style="font-size:1.8rem; color:var(--accent);"></i></div>
+        <div class="mn-item" onclick="app.backup()"><i class="fa-solid fa-download"></i> حفظ</div>
+    </nav>
+
+    <div id="modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3 style="margin-bottom:15px;">بيانات الشخصية</h3>
+            <div class="inp-group">
+                <label>الاسم</label>
+                <input type="text" id="pName">
+            </div>
+            <div class="inp-group">
+                <label>سنة الميلاد</label>
+                <input type="number" id="pBirth" placeholder="اتركها فارغة للتقدير">
+            </div>
+            <div class="inp-group">
+                <label>سنة الوفاة (اختياري)</label>
+                <input type="number" id="pDeath" placeholder="لضبط طول الشريط">
+            </div>
+            <input type="hidden" id="pIdx">
+            <div style="display:flex; gap:10px;">
+                <button class="btn" style="background:#f1f5f9; flex:1;" onclick="app.closeModal()">إلغاء</button>
+                <button class="btn btn-primary" style="flex:1;" onclick="app.save()">حفظ</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+
+class App {
+    constructor() {
+        this.data = JSON.parse(localStorage.getItem('Geneo_v3_DB')) || [];
+        this.render();
+    }
+
+    process() {
+        if (!this.data.length) return [];
+        let list = JSON.parse(JSON.stringify(this.data));
+        let anchor = list[0].birth ? parseInt(list[0].birth) : new Date().getFullYear();
+        
+        list.forEach((p, i) => {
+            // Birth
+            if(p.birth) { p.cB = parseInt(p.birth); p.est = false; anchor = p.cB; }
+            else { p.cB = (i===0)? anchor : anchor - 33; p.est = true; anchor = p.cB; }
+            
+            // Death (For Chart Width)
+            if(p.death) { p.cD = parseInt(p.death); }
+            else { p.cD = p.cB + 65; } // Default lifespan 65 years
+        });
+        return list;
+    }
+
+    render() {
+        const list = this.process();
+        this.renderTable(list);
+        this.renderChart(list);
+        localStorage.setItem('Geneo_v3_DB', JSON.stringify(this.data));
+    }
+
+    renderTable(list) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+        if(!list.length) document.getElementById('emptyState').style.display='block';
+        else document.getElementById('emptyState').style.display='none';
+
+        list.forEach((p, i) => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>${i*-1}</td>
+                    <td><b>${p.name}</b></td>
+                    <td>${p.cB} ${p.est ? '<small style="color:#ccc">(ت)</small>' : ''}</td>
+                    <td>
+                        <i class="fa-solid fa-pen" style="color:var(--accent); margin-left:10px;" onclick="app.openModal(${i})"></i>
+                        <i class="fa-solid fa-trash" style="color:#ef4444;" onclick="app.del(${i})"></i>
+                    </td>
+                </tr>`;
+        });
+    }
+
+    // --- 🔥 كود المخطط البياني الجديد 🔥 ---
+    renderChart(list) {
+        const container = document.getElementById('chartCanvas');
+        container.innerHTML = '';
+        if(list.length === 0) return;
+
+        // 1. حساب المقياس (Scale)
+        // نأخذ أقدم سنة وأحدث سنة مع هامش بسيط
+        const minYear = list[list.length-1].cB - 10; 
+        const maxYear = list[0].cD + 10;
+        const totalYears = maxYear - minYear;
+
+        // 2. رسم الهيدر (سنوات المسطرة)
+        let headerHTML = '<div class="chart-header">';
+        headerHTML += `<span>${minYear}</span>`;
+        headerHTML += `<span>منتصف الحقبة (${Math.round((minYear+maxYear)/2)})</span>`;
+        headerHTML += `<span>${maxYear}</span>`;
+        headerHTML += '</div>';
+        container.innerHTML += headerHTML;
+
+        // 3. رسم الصفوف
+        list.forEach((p, i) => {
+            // حساب النسب المئوية للموقع والعرض
+            const startPct = ((p.cB - minYear) / totalYears) * 100;
+            const widthPct = ((p.cD - p.cB) / totalYears) * 100;
+
+            const barClass = p.est ? 'bar-est' : 'bar-real';
+            
+            container.innerHTML += `
+                <div class="chart-row">
+                    <div class="chart-bar ${barClass}" style="left: ${startPct}%; width: ${widthPct}%;"></div>
+                    <div class="chart-label" style="left: ${startPct + widthPct + 1}%;">${p.name}</div>
+                </div>
+            `;
+        });
+    }
+
+    nav(view) {
+        document.getElementById('view-home').style.display = view==='home'?'block':'none';
+        document.getElementById('view-timeline').style.display = view==='timeline'?'block':'none';
+    }
+
+    openModal(idx) {
+        document.getElementById('modal').style.display='flex';
+        document.getElementById('pIdx').value = idx;
+        if(idx==='new'){
+            document.getElementById('pName').value='';
+            document.getElementById('pBirth').value='';
+            document.getElementById('pDeath').value='';
+        } else {
+            const p = this.data[idx];
+            document.getElementById('pName').value=p.name;
+            document.getElementById('pBirth').value=p.birth||'';
+            document.getElementById('pDeath').value=p.death||'';
+        }
+    }
+
+    closeModal() { document.getElementById('modal').style.display='none'; }
+    
+    save() {
+        const obj = {
+            name: document.getElementById('pName').value,
+            birth: document.getElementById('pBirth').value,
+            death: document.getElementById('pDeath').value
+        };
+        if(!obj.name) return alert('الاسم مطلوب');
+        const idx = document.getElementById('pIdx').value;
+        if(idx==='new') this.data.push(obj); else this.data[idx]=obj;
+        this.closeModal(); this.render();
+    }
+
+    del(idx) { if(confirm('حذف؟')) { this.data.splice(idx,1); this.render(); } }
+    backup() {
+        const a = document.createElement('a');
+        a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.data));
+        a.download = "backup.json"; a.click();
+    }
+}
+const app = new App();
+</script>
+</body>
+</html>
